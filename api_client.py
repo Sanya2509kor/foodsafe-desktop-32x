@@ -108,3 +108,69 @@ class ApiClient:
         if not result.get('success'):
             raise ApiError(result.get('error', 'Неизвестная ошибка'))
         return result
+    
+    
+    
+    # ---------- Сотрудники ----------
+
+    def employee_create(self, establishment_id, name, position=''):
+        url = f'{self.base_url}/api/establishments/{establishment_id}/employees/create/'
+        data = {'key': self.api_key, 'name': name, 'position': position}
+        return self._post(url, data)
+
+    def employee_update(self, establishment_id, employee_id, name, position=''):
+        url = f'{self.base_url}/api/establishments/{establishment_id}/employees/{employee_id}/update/'
+        data = {'key': self.api_key, 'name': name, 'position': position}
+        return self._post(url, data)
+
+    def employee_delete(self, establishment_id, employee_id):
+        url = f'{self.base_url}/api/establishments/{establishment_id}/employees/{employee_id}/delete/'
+        return self._post(url, {'key': self.api_key})
+
+    def employee_toggle(self, establishment_id, employee_id):
+        url = f'{self.base_url}/api/establishments/{establishment_id}/employees/{employee_id}/toggle/'
+        return self._post(url, {'key': self.api_key})
+
+    # ---------- Категории ----------
+
+    def category_create(self, establishment_id, name, color='#6c757d', order=0):
+        url = f'{self.base_url}/api/establishments/{establishment_id}/categories/create/'
+        data = {'key': self.api_key, 'name': name, 'color': color, 'order': order}
+        return self._post(url, data)
+
+    def category_update(self, establishment_id, category_id, name, color, order):
+        url = f'{self.base_url}/api/establishments/{establishment_id}/categories/{category_id}/update/'
+        data = {'key': self.api_key, 'name': name, 'color': color, 'order': order}
+        return self._post(url, data)
+
+    def category_delete(self, establishment_id, category_id):
+        url = f'{self.base_url}/api/establishments/{establishment_id}/categories/{category_id}/delete/'
+        return self._post(url, {'key': self.api_key})
+
+    def category_toggle(self, establishment_id, category_id):
+        url = f'{self.base_url}/api/establishments/{establishment_id}/categories/{category_id}/toggle/'
+        return self._post(url, {'key': self.api_key})
+    
+    
+    def _post(self, url, data):
+        for attempt in range(3):
+            try:
+                r = self.session.post(url, data=data, timeout=20)
+                break
+            except requests.RequestException as e:
+                if attempt < 2:
+                    time.sleep(0.5 + attempt * 0.5)
+                    continue
+                raise ApiError(f'Нет связи с сервером: {e}')
+
+        if r.status_code == 401:
+            raise ApiError('Неверный или отозванный ключ')
+        if r.status_code == 403:
+            raise ApiError('Нет доступа')
+        if not r.ok:
+            raise ApiError(f'Ошибка сервера: {r.status_code}')
+
+        result = r.json()
+        if not result.get('success'):
+            raise ApiError(result.get('error', 'Неизвестная ошибка'))
+        return result

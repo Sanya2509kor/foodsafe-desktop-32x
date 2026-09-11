@@ -870,7 +870,18 @@ class MainWindow(QMainWindow):
         menu.addAction(act_cart)
 
         menu.addSeparator()
+        
+        act_employees = QAction('👥  Сотрудники', self)
+        act_employees.triggered.connect(self._open_employees)
+        menu.addAction(act_employees)
+        
 
+        act_categories = QAction('🏷  Категории', self)
+        act_categories.triggered.connect(self._open_categories)
+        menu.addAction(act_categories)
+
+        menu.addSeparator()
+        
         act_printer = QAction('⚙  Настройки', self)
         act_printer.triggered.connect(self._open_settings)
         menu.addAction(act_printer)
@@ -878,3 +889,45 @@ class MainWindow(QMainWindow):
         # Показать меню рядом с кнопкой
         pos = self.more_btn.mapToGlobal(self.more_btn.rect().bottomLeft())
         menu.exec_(pos)
+        
+        
+    def _open_employees(self):
+        if not self.current_est:
+            QMessageBox.warning(self, 'Нет заведения', 'Выберите заведение')
+            return
+        if not self._ensure_api():
+            return
+        from ui.employees_dialog import EmployeesDialog
+        dlg = EmployeesDialog(self, self.api, self.current_est)
+        dlg.exec_()
+        self._load_establishment(self.current_est['id'])
+
+    def _open_categories(self):
+        if not self.current_est:
+            QMessageBox.warning(self, 'Нет заведения', 'Выберите заведение')
+            return
+        if not self._ensure_api():
+            return
+        from ui.categories_dialog import CategoriesDialog
+        dlg = CategoriesDialog(self, self.api, self.current_est)
+        dlg.exec_()
+        self._load_establishment(self.current_est['id'])
+
+    def _ensure_api(self):
+        """Возвращает True, если есть рабочий API-клиент."""
+        if self.api and not self.offline:
+            return True
+        url = self.config.get('api_url')
+        key = self.config.get('api_key')
+        if not url or not key:
+            QMessageBox.warning(self, 'Нет подключения', 'Введите ключ на входе')
+            return False
+        try:
+            client = ApiClient(url, key)
+            client.me()
+            self.api = client
+            self.offline = False
+            return True
+        except ApiError as e:
+            QMessageBox.warning(self, 'Нет связи', str(e))
+            return False
