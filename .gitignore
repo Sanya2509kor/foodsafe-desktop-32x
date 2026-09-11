@@ -1,0 +1,7 @@
+venv
+venv32
+dist
+__pycache__
+build
+
+.specc
