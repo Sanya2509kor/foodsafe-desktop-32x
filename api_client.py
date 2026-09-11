@@ -1,5 +1,6 @@
 # api_client.py
 import requests
+import time
 
 
 class ApiError(Exception):
@@ -15,10 +16,18 @@ class ApiClient:
     def _get(self, path, **params):
         params['key'] = self.api_key
         url = f'{self.base_url}{path}'
-        try:
-            r = self.session.get(url, params=params, timeout=15)
-        except requests.RequestException as e:
-            raise ApiError(f'Нет связи с сервером: {e}')
+
+        last_error = None
+        for attempt in range(3):  # 3 попытки
+            try:
+                r = self.session.get(url, params=params, timeout=20)
+                break
+            except requests.RequestException as e:
+                last_error = e
+                if attempt < 2:
+                    time.sleep(0.5 + attempt * 0.5)  # 0.5, 1.0 сек
+                    continue
+                raise ApiError(f'Нет связи с сервером: {e}')
 
         if r.status_code == 401:
             raise ApiError('Неверный или отозванный ключ')
@@ -74,10 +83,19 @@ class ApiClient:
         if employee_id is not None:
             data['employee_id'] = employee_id
 
-        try:
-            r = self.session.post(url, data=data, timeout=15)
-        except requests.RequestException as e:
-            raise ApiError(f'Нет связи с сервером: {e}')
+        # Retry — как в _get
+        last_error = None
+        r = None
+        for attempt in range(3):
+            try:
+                r = self.session.post(url, data=data, timeout=20)
+                break
+            except requests.RequestException as e:
+                last_error = e
+                if attempt < 2:
+                    time.sleep(0.5 + attempt * 0.5)  # 0.5, 1.0 сек
+                    continue
+                raise ApiError(f'Нет связи с сервером: {e}')
 
         if r.status_code == 401:
             raise ApiError('Неверный или отозванный ключ')

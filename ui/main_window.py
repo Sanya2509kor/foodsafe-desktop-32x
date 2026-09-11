@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QStyle
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer, QSize
 from datetime import datetime, timedelta
 
 import settings
@@ -23,6 +23,7 @@ from ui.styles import MAIN_QSS, DARK_QSS
 from ui.create_label_dialog import CreateLabelDialog
 from label_renderer import render_label_pixmap
 from typing import Optional
+from ui.icons import icon
 
 
 class MainWindow(QMainWindow):
@@ -36,6 +37,11 @@ class MainWindow(QMainWindow):
         self.labels = []
         self.selected_category = 'all'
         self.search_text = ''
+        # Таймер debounce для поиска
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(250)  # 250 мс
+        self._search_timer.timeout.connect(self._apply_search)
         self._init_tray()
 
         self._build_ui()
@@ -60,97 +66,99 @@ class MainWindow(QMainWindow):
         top = QFrame()
         top.setObjectName('topbar')
         top_layout = QHBoxLayout(top)
-        top_layout.setContentsMargins(16, 10, 16, 10)
-        top_layout.setSpacing(10)
+        top_layout.setContentsMargins(10, 6, 10, 6)
+        top_layout.setSpacing(6)
 
-        # Бренд
-        brand = QLabel('🏷  FoodSafe')
+        # Бренд (короткий)
+        brand = QLabel(' FoodSafe')
+        brand.setPixmap(icon('tag', '#0d6efd', 22).pixmap(22, 22))
         brand.setObjectName('brand')
         top_layout.addWidget(brand)
 
-        top_layout.addSpacing(8)
+        # --- Заведение ---
+        top_layout.addWidget(QLabel('Заведение'))
+        self.est_combo = QComboBox()
+        self.est_combo.setMinimumWidth(140)
+        self.est_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.est_combo.currentIndexChanged.connect(self._on_establishment_changed)
+        top_layout.addWidget(self.est_combo, 1)
 
-        # Кнопки-иконки слева от полей — ☰ и тема
-        self.toggle_cats_btn = QPushButton('☰')
-        self.toggle_cats_btn.setProperty('class', 'secondary')
+        # --- Сотрудник ---
+        top_layout.addWidget(QLabel('Сотрудник'))
+        self.emp_combo = QComboBox()
+        self.emp_combo.setMinimumWidth(120)
+        self.emp_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.emp_combo.currentIndexChanged.connect(self._on_employee_changed)
+        top_layout.addWidget(self.emp_combo, 1)
+
+        # Кнопки-иконки
+        self.toggle_cats_btn = QPushButton()
+        self.toggle_cats_btn.setIcon(icon('menu'))
         self.toggle_cats_btn.setProperty('class', 'icon-btn')
         self.toggle_cats_btn.setCheckable(True)
         self.toggle_cats_btn.setChecked(True)
-        self.toggle_cats_btn.setToolTip('Скрыть/показать категории (Ctrl+B)')
+        self.toggle_cats_btn.setToolTip('Скрыть/показать категории')
         self.toggle_cats_btn.clicked.connect(self._toggle_categories)
         top_layout.addWidget(self.toggle_cats_btn)
 
-        theme_btn = QPushButton('🌓')
-        theme_btn.setProperty('class', 'secondary')
+        theme_btn = QPushButton()
+        theme_btn.setIcon(icon('sun'))
         theme_btn.setProperty('class', 'icon-btn')
-        theme_btn.setToolTip('Переключить тему')
+        theme_btn.setToolTip('Тема')
         theme_btn.clicked.connect(self._toggle_theme)
         top_layout.addWidget(theme_btn)
 
-        top_layout.addSpacing(16)
-
-        # Поля: заведение, сотрудник
-        top_layout.addWidget(QLabel('Заведение'))
-        self.est_combo = QComboBox()
-        self.est_combo.setMinimumWidth(200)
-        self.est_combo.currentIndexChanged.connect(self._on_establishment_changed)
-        top_layout.addWidget(self.est_combo)
-
-        top_layout.addSpacing(10)
-
-        top_layout.addWidget(QLabel('Сотрудник'))
-        self.emp_combo = QComboBox()
-        self.emp_combo.setMinimumWidth(180)
-        self.emp_combo.currentIndexChanged.connect(self._on_employee_changed)
-        top_layout.addWidget(self.emp_combo)
-
-        top_layout.addStretch()
-
-        # Кнопки действий справа
-        self.sync_btn = QPushButton('🔄  Синхронизация')
-        self.sync_btn.setProperty('class', 'secondary')
-        self.sync_btn.clicked.connect(self._sync)
-        top_layout.addWidget(self.sync_btn)
-        
-        create_btn = QPushButton('➕  Создать')
-        create_btn.setProperty('class', 'success')
-        create_btn.clicked.connect(self._create_label)
-        top_layout.addWidget(create_btn)
-
-        self.cart_btn = QPushButton('🛒  Корзина')
-        self.cart_btn.setProperty('class', 'secondary')
-        self.cart_btn.clicked.connect(self._open_cart)
-        top_layout.addWidget(self.cart_btn)
-
-        settings_btn = QPushButton('⚙  Настройки')
-        settings_btn.setProperty('class', 'secondary')
-        settings_btn.clicked.connect(self._open_settings)
-        top_layout.addWidget(settings_btn)
+        # Кнопка «Ещё» — меню с остальными действиями
+        self.more_btn = QPushButton()
+        self.more_btn.setIcon(icon('more'))
+        self.more_btn.setProperty('class', 'icon-btn')
+        self.more_btn.setToolTip('Ещё')
+        self.more_btn.clicked.connect(self._show_more_menu)
+        top_layout.addWidget(self.more_btn)
 
         root.addWidget(top)
 
-        # ============ ВЕРХНЯЯ ПАНЕЛЬ — СТРОКА 2 (поиск) ============
+        # ============ ВЕРХНЯЯ ПАНЕЛЬ — СТРОКА 2 (поиск + главные действия) ============
         top2 = QFrame()
         top2.setObjectName('topbar2')
         top2_layout = QHBoxLayout(top2)
-        top2_layout.setContentsMargins(16, 8, 16, 8)
-        top2_layout.setSpacing(10)
+        top2_layout.setContentsMargins(10, 6, 10, 6)
+        top2_layout.setSpacing(6)
 
         search_icon = QLabel('🔍')
         search_icon.setStyleSheet('font-size: 14px;')
         top2_layout.addWidget(search_icon)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText('Поиск по названию продукта...   (Ctrl+F)')
+        self.search_input.setPlaceholderText('Поиск...')
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self._on_search_changed)
         top2_layout.addWidget(self.search_input, 1)
 
-        self.sync_label = QLabel('')
-        self.sync_label.setProperty('class', 'hint')
-        top2_layout.addWidget(self.sync_label)
+        # Главные действия — компактно
+        self.sync_btn = QPushButton(' Синхронизация')
+        self.sync_btn.setIcon(icon('refresh', color='#ffffff', size=20))
+        self.sync_btn.setIconSize(QSize(20, 20))
+        self.sync_btn.setProperty('class', 'secondary')
+        self.sync_btn.setToolTip('Синхронизация')
+        self.sync_btn.clicked.connect(self._sync)
+        top2_layout.addWidget(self.sync_btn)
 
+        create_btn = QPushButton('➕')
+        create_btn.setProperty('class', 'success')
+        create_btn.setToolTip('Создать маркировку')
+        create_btn.clicked.connect(self._create_label)
+        top2_layout.addWidget(create_btn)
+
+        self.cart_btn = QPushButton('🛒')
+        self.cart_btn.setProperty('class', 'secondary')
+        self.cart_btn.setToolTip('Корзина')
+        self.cart_btn.clicked.connect(self._open_cart)
+        top2_layout.addWidget(self.cart_btn)
+
+        # Подпись синхронизации — в статус-бар, а не сюда
         root.addWidget(top2)
+
 
         # ============ ОСНОВНАЯ ЧАСТЬ ============
         body = QHBoxLayout()
@@ -199,6 +207,10 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel('')
         self.statusBar().addWidget(self.status_label)
 
+        # Подпись синхронизации — в правом углу статусбара
+        self.sync_label = QLabel('')
+        self.sync_label.setProperty('class', 'hint')
+        self.statusBar().addPermanentWidget(self.sync_label)
         self._update_sync_label()
 
         # Настройки
@@ -360,7 +372,16 @@ class MainWindow(QMainWindow):
             self.grid.addWidget(empty, 0, 0)
             return
 
-        cols = 3
+        from PyQt5.QtWidgets import QApplication
+        screen_w = self.width()
+        if screen_w < 1000:
+            cols = 2
+        elif screen_w < 1300:
+            cols = 3
+        elif screen_w < 1700:
+            cols = 4
+        else:
+            cols = 5
         for i, label in enumerate(filtered):
             card = LabelCard(label)
             card.print_requested.connect(self._print_label)
@@ -540,7 +561,14 @@ class MainWindow(QMainWindow):
         
     # поиск
     def _on_search_changed(self, text):
+        """Вызывается на каждое нажатие клавиши в поиске.
+        Запускает таймер — реальная фильтрация будет через 250 мс
+        после последнего нажатия."""
         self.search_text = text.strip().lower()
+        self._search_timer.start()  # перезапустить таймер
+
+    def _apply_search(self):
+        """Применить фильтр поиска к карточкам."""
         self._render_labels()
         
     # бургер
@@ -823,3 +851,30 @@ class MainWindow(QMainWindow):
                 f"{self.config.get('printer_name', '—')}, пауза: "
                 f"{self.config.get('print_delay_ms', 300)} мс"
             )
+            
+            
+    def _show_more_menu(self):
+        """Выпадающее меню с дополнительными действиями."""
+        menu = QMenu(self)
+
+        act_sync = QAction('🔄  Синхронизация', self)
+        act_sync.triggered.connect(self._sync)
+        menu.addAction(act_sync)
+
+        act_create = QAction('➕  Создать маркировку', self)
+        act_create.triggered.connect(self._create_label)
+        menu.addAction(act_create)
+
+        act_cart = QAction('🛒  Корзина', self)
+        act_cart.triggered.connect(self._open_cart)
+        menu.addAction(act_cart)
+
+        menu.addSeparator()
+
+        act_printer = QAction('⚙  Настройки', self)
+        act_printer.triggered.connect(self._open_settings)
+        menu.addAction(act_printer)
+
+        # Показать меню рядом с кнопкой
+        pos = self.more_btn.mapToGlobal(self.more_btn.rect().bottomLeft())
+        menu.exec_(pos)

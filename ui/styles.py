@@ -53,8 +53,8 @@ QPushButton {
     background-color: #0d6efd;
     color: white;
     border: none;
-    padding: 8px 14px;
-    border-radius: 8px;
+    padding: 6px 10px;      /* было 8px 14px */
+    border-radius: 6px;
     font-weight: 600;
 }
 QPushButton:hover { background-color: #0b5ed7; }
@@ -78,11 +78,11 @@ QPushButton.danger { background-color: #dc3545; }
 QPushButton.danger:hover { background-color: #bb2d3b; }
 
 QPushButton.icon-btn {
-    min-width: 36px;
-    max-width: 36px;
-    min-height: 34px;
-    padding: 4px;
-    font-size: 16px;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 30px;
+    padding: 2px;
+    font-size: 15px;
 }
 
 QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QDateEdit, QDateTimeEdit {
