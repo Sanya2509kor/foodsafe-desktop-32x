@@ -4,7 +4,7 @@ from paths import config_file
 
 
 DEFAULTS = {
-    'api_url': 'https://checkin-site.tw1.ru',
+    'api_url': 'https://markirovki24.ru',
     'api_key': '',
     'printer_name': '',
     'label_width_mm': 58,
@@ -16,6 +16,8 @@ DEFAULTS = {
     'theme': 'light',
     # НОВОЕ:
     'print_delay_ms': 300,   # пауза между этикетками, миллисекунды
+    'ui_scale': 'normal',   # 'normal' | 'large' | 'xlarge'
+    'remote_print_enabled': True,
 }
 
 def load_config():

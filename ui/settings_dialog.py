@@ -1,7 +1,7 @@
 # ui/settings_dialog.py
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QHBoxLayout,
-    QLabel, QSpinBox, QComboBox, QPushButton, QMessageBox,
+    QLabel, QSpinBox, QComboBox, QPushButton, QMessageBox, QCheckBox
 )
 from PyQt5.QtCore import Qt
 
@@ -75,6 +75,27 @@ class SettingsDialog(QDialog):
         theme = self.config.get('theme', 'light')
         self.theme_combo.setCurrentIndex(0 if theme == 'light' else 1)
         form.addRow('Тема:', self.theme_combo)
+        
+        # --- Размер интерфейса ---
+        self.scale_combo = QComboBox()
+        self.scale_combo.addItem('Обычный', userData='normal')
+        self.scale_combo.addItem('Крупный (для слабовидящих)', userData='large')
+        self.scale_combo.addItem('Очень крупный', userData='xlarge')
+        scale = self.config.get('ui_scale', 'normal')
+        idx = {'normal': 0, 'large': 1, 'xlarge': 2}.get(scale, 0)
+        self.scale_combo.setCurrentIndex(idx)
+        form.addRow('Размер интерфейса:', self.scale_combo)
+        
+        # --- Удалённая печать с сайта ---
+        self.remote_print_check = QCheckBox('Разрешить печать с сайта')
+        self.remote_print_check.setChecked(
+            bool(self.config.get('remote_print_enabled', True))
+        )
+        self.remote_print_check.setToolTip(
+            'Если включено, планшет будет принимать задания на печать\n'
+            'со страницы «Печать» на сайте (с телефона официанта и т.д.).'
+        )
+        form.addRow('Печать с сайта:', self.remote_print_check)
 
         layout.addLayout(form)
 
@@ -109,6 +130,8 @@ class SettingsDialog(QDialog):
         self.config['print_delay_ms'] = int(self.delay_spin.value())
         self.config['auto_sync_minutes'] = int(self.auto_sync_spin.value())
         self.config['theme'] = self.theme_combo.currentData()
+        self.config['ui_scale'] = self.scale_combo.currentData()
+        self.config['remote_print_enabled'] = bool(self.remote_print_check.isChecked())
 
         settings.save_config(self.config)
         self.accept()

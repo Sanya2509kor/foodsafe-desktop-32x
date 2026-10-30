@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QStyle
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt, QTimer, QSize
+from PyQt5.QtCore import Qt, QTimer, QSize, QEvent, QObject, QThreadPool
 from datetime import datetime, timedelta
 
 import settings
@@ -24,6 +24,7 @@ from ui.create_label_dialog import CreateLabelDialog
 from label_renderer import render_label_pixmap
 from typing import Optional
 from ui.icons import icon
+from ui.styles import build_qss
 
 
 class MainWindow(QMainWindow):
@@ -37,6 +38,23 @@ class MainWindow(QMainWindow):
         self.labels = []
         self.selected_category = 'all'
         self.search_text = ''
+        
+        # Таймер "тишины" — 2 секунды без действий = можно опрашивать сервер
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setSingleShot(True)
+        self._idle_timer.setInterval(2000)   # 2 секунды
+        self._idle_timer.timeout.connect(self._on_idle)
+        
+        self._thread_pool = QThreadPool.globalInstance()
+        self._poll_in_progress = False   # защита от параллельных опросов
+        
+        # Запускаем сразу — если пользователь ничего не делает, опрос начнётся через 2 секунды
+        self._idle_timer.start()
+        
+        # Устанавливаем фильтр событий на приложение, чтобы ловить клики и ввод
+        from PyQt5.QtWidgets import QApplication
+        QApplication.instance().installEventFilter(self)
+        
         # Таймер debounce для поиска
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -51,8 +69,26 @@ class MainWindow(QMainWindow):
             title += ' (оффлайн)'
         self.setWindowTitle(title)
         self.resize(1280, 800)
+        
+        # Таймер опроса заданий
+        self._print_timer = QTimer(self)
+        self._print_timer.setInterval(3000)
+        self._print_timer.timeout.connect(self._poll_print_jobs)
+        self._print_timer.start()
+        
+        if self.offline:
+            self._ensure_api_silent()
 
         self._load_establishments()
+        
+        # Проверяем подписку
+        if not self._check_subscription():
+            # Блокируем всё, кроме синхронизации и настроек
+            self._set_blocked_ui()
+            
+            
+        
+        
 
     def _build_ui(self):
         central = QWidget()
@@ -107,6 +143,12 @@ class MainWindow(QMainWindow):
         theme_btn.setToolTip('Тема')
         theme_btn.clicked.connect(self._toggle_theme)
         top_layout.addWidget(theme_btn)
+        
+        scale_btn = QPushButton('A+')
+        scale_btn.setProperty('class', 'icon-btn')
+        scale_btn.setToolTip('Размер интерфейса')
+        scale_btn.clicked.connect(self._toggle_scale)
+        top_layout.addWidget(scale_btn)
 
         # Кнопка «Ещё» — меню с остальными действиями
         self.more_btn = QPushButton()
@@ -158,6 +200,16 @@ class MainWindow(QMainWindow):
 
         # Подпись синхронизации — в статус-бар, а не сюда
         root.addWidget(top2)
+        
+        self.warn_banner = QLabel('')
+        self.warn_banner.setAlignment(Qt.AlignCenter)
+        self.warn_banner.setStyleSheet(
+            'background: #fff3cd; color: #856404; '
+            'padding: 8px 16px; font-weight: 600; '
+            'border-bottom: 1px solid #ffc107;'
+        )
+        self.warn_banner.setVisible(False)
+        root.addWidget(self.warn_banner)
 
 
         # ============ ОСНОВНАЯ ЧАСТЬ ============
@@ -212,6 +264,10 @@ class MainWindow(QMainWindow):
         self.sync_label.setProperty('class', 'hint')
         self.statusBar().addPermanentWidget(self.sync_label)
         self._update_sync_label()
+        
+        self.remote_label = QLabel('')
+        self.remote_label.setProperty('class', 'hint')
+        self.statusBar().addPermanentWidget(self.remote_label)
 
         # Настройки
         visible = self.config.get('categories_visible', True)
@@ -225,10 +281,21 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence('Escape'), self.search_input, activated=self.search_input.clear)
         QShortcut(QKeySequence('Ctrl+B'), self, activated=self.toggle_cats_btn.toggle)
         QShortcut(QKeySequence('Ctrl+W'), self, activated=self.hide)
+        
+    def _update_remote_label(self):
+        if not self.config.get('remote_print_enabled', True):
+            self.remote_label.setText('🖨  Приём с сайта: выкл')
+            return
+
+        if self.offline or not self.api:
+            self.remote_label.setText('🖨  Приём с сайта: нет связи')
+        else:
+            self.remote_label.setText('🖨  Приём с сайта: вкл')
 
     # ---------- Данные ----------
 
     def _load_establishments(self):
+        """Заполняет combo заведений и загружает первое."""
         self.est_combo.blockSignals(True)
         self.est_combo.clear()
         for est in local_db.get_establishments():
@@ -239,12 +306,33 @@ class MainWindow(QMainWindow):
             self.est_combo.setCurrentIndex(0)
             self._load_establishment(self.est_combo.itemData(0))
 
+        # Баннер, если осталось мало дней
+        self._update_warn_banner()
+                
+                
+    def _show_blocked_placeholder(self):
+        while self.grid.count():
+            child = self.grid.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        blocked = QLabel(
+            '🔒  Заведение заблокировано.\n'
+            'Продлите подписку на сайте и нажмите «Синхронизация»\n'
+            'или выберите другое заведение.'
+        )
+        blocked.setAlignment(Qt.AlignCenter)
+        blocked.setStyleSheet(
+            'font-size: 18px; color: #dc3545; padding: 60px; line-height: 1.6;'
+        )
+        self.grid.addWidget(blocked, 0, 0)
+
     def _on_establishment_changed(self, idx):
         est_id = self.est_combo.itemData(idx)
         if est_id:
             self._load_establishment(est_id)
 
     def _load_establishment(self, est_id):
+        """Загружает данные конкретного заведения."""
         self.current_est = next(
             (e for e in local_db.get_establishments() if e['id'] == est_id),
             None
@@ -252,8 +340,21 @@ class MainWindow(QMainWindow):
         if not self.current_est:
             return
 
+        # --- Проверка подписки именно этого заведения ---
+        if int(self.current_est.get('is_paid') or 0) != 1:
+            from ui.blocked_dialog import BlockedDialog
+            BlockedDialog(self, self.current_est, reason='expired').exec_()
+            self.categories = []
+            self.labels = []
+            self._render_categories()
+            self._show_blocked_placeholder()
+            return
+
         # Категории и метки
-        self.categories = local_db.get_categories(est_id)
+        self.categories = [
+            c for c in local_db.get_categories(est_id)
+            if int(c.get('is_active') or 0) == 1
+        ]
         self.labels = local_db.get_labels(est_id)
         self.selected_category = 'all'
 
@@ -263,11 +364,14 @@ class MainWindow(QMainWindow):
         self._render_categories()
         self._render_labels()
         self._update_cart_counter()
+        self._update_warn_banner()
         
     def _load_employees(self, est_id):
         """Заполняет combo сотрудников и восстанавливает сохранённый выбор."""
         employees = local_db.get_employees(est_id)
-
+        # Оставляем только активных
+        employees = [e for e in employees if int(e.get('is_active') or 0) == 1]
+        
         self.emp_combo.blockSignals(True)
         self.emp_combo.clear()
 
@@ -283,12 +387,17 @@ class MainWindow(QMainWindow):
         # Восстанавливаем сохранённый выбор для этого заведения
         saved_id = settings.get_selected_employee(est_id)
         if saved_id is not None:
+            found = False
             for i in range(self.emp_combo.count()):
                 if self.emp_combo.itemData(i) == saved_id:
                     self.emp_combo.setCurrentIndex(i)
+                    found = True
                     break
+            if not found:
+                # Сохранённый сотрудник недоступен — сбрасываем выбор
+                self.emp_combo.setCurrentIndex(0)
+                settings.set_selected_employee(est_id, None)
         else:
-            # По умолчанию — «не выбрано»
             self.emp_combo.setCurrentIndex(0)
 
         self.emp_combo.blockSignals(False)
@@ -419,6 +528,8 @@ class MainWindow(QMainWindow):
         dlg.setWindowModality(Qt.WindowModal)
         dlg.setMinimumWidth(400)
         dlg.show()
+        # После синхронизации — перезагрузить список заведений
+        self._load_establishments()
 
         def report(msg):
             dlg.setLabelText(msg)
@@ -450,6 +561,13 @@ class MainWindow(QMainWindow):
             self, 'Готово',
             f'Данные обновлены. Последняя синхронизация: {local_db.last_sync()}'
         )
+        
+        # После успешной синхронизации — перепроверить подписку
+        if self._check_subscription():
+            # Разблокируем UI
+            self._load_establishments()
+        else:
+            self._set_blocked_ui()
 
     # ---------- Печать ----------
     
@@ -656,9 +774,18 @@ class MainWindow(QMainWindow):
             event.accept()
             
     # смена темы 
+    SCALE_VALUES = {
+        'normal': 1.0,
+        'large':  1.25,
+        'xlarge': 1.5,
+    }
+    SCALE_CYCLE = ['normal', 'large', 'xlarge']
+
     def _apply_theme(self):
         theme = self.config.get('theme', 'light')
-        qss = DARK_QSS if theme == 'dark' else MAIN_QSS
+        scale_name = self.config.get('ui_scale', 'normal')
+        scale = self.SCALE_VALUES.get(scale_name, 1.0)
+        qss = build_qss(theme, scale)
         self.setStyleSheet(qss)
 
 
@@ -846,6 +973,7 @@ class MainWindow(QMainWindow):
             # Обновим конфиг и применим тему
             self.config = settings.load_config()
             self._apply_theme()
+            self._update_remote_label()
             self.status_label.setText(
                 f"Настройки сохранены. Принтер: "
                 f"{self.config.get('printer_name', '—')}, пауза: "
@@ -931,3 +1059,209 @@ class MainWindow(QMainWindow):
         except ApiError as e:
             QMessageBox.warning(self, 'Нет связи', str(e))
             return False
+        
+        
+    def _toggle_scale(self):
+        current = self.config.get('ui_scale', 'normal')
+        idx = self.SCALE_CYCLE.index(current) if current in self.SCALE_CYCLE else 0
+        new = self.SCALE_CYCLE[(idx + 1) % len(self.SCALE_CYCLE)]
+        self.config['ui_scale'] = new
+        settings.save_config(self.config)
+        self._apply_theme()
+        labels = {'normal': 'обычный', 'large': 'крупный', 'xlarge': 'очень крупный'}
+        self.status_label.setText(f'Размер интерфейса: {labels[new]}')
+        
+        
+    def _check_subscription(self):
+        """
+        Проверяет оплату заведений. Возвращает True,
+        если есть хотя бы одно активное заведение.
+        """
+        ests = local_db.get_establishments()
+        if not ests:
+            return True   # нет заведений — нечего проверять
+
+        active = [e for e in ests if int(e.get('is_paid') or 0) == 1]
+        if active:
+            return True
+
+        # Все заведения заблокированы — показать диалог
+        from ui.blocked_dialog import BlockedDialog
+        # показываем для первого в списке
+        dlg = BlockedDialog(self, ests[0], reason='expired')
+        dlg.exec_()
+        return False
+    
+    
+    def _set_blocked_ui(self):
+        """Оставляет доступными только кнопки синхронизации и настроек."""
+        # Отключаем главные действия
+        for attr in ('toggle_cats_btn', 'cart_btn', 'search_input',
+                    'est_combo', 'emp_combo'):
+            w = getattr(self, attr, None)
+            if w is not None:
+                w.setEnabled(False)
+
+        # Прячем карточки
+        while self.grid.count():
+            child = self.grid.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Заглушка по центру
+        blocked = QLabel(
+            '🔒  Заведение заблокировано.\n'
+            'Продлите подписку на сайте и нажмите «Синхронизация».'
+        )
+        blocked.setAlignment(Qt.AlignCenter)
+        blocked.setStyleSheet(
+            'font-size: 18px; color: #dc3545; padding: 60px; line-height: 1.6;'
+        )
+        self.grid.addWidget(blocked, 0, 0)
+        
+        
+    def _update_warn_banner(self):
+        """Показывает/скрывает баннер о скором окончании подписки."""
+        if not self.current_est:
+            self.warn_banner.setVisible(False)
+            return
+        days = self.current_est.get('days_left')
+        if days is not None and 0 <= days <= 7:
+            self.warn_banner.setText(
+                f'⚠ Подписка на «{self.current_est["name"]}» закончится '
+                f'через {days} дн. Продлите на сайте.'
+            )
+            self.warn_banner.setVisible(True)
+        else:
+            self.warn_banner.setVisible(False)
+            
+            
+    # печать с сайта на планшете    
+    def _poll_print_jobs(self):
+        """Проверяет очередь заданий на печать (в фоне)."""
+        # Отключено пользователем
+        if not self.config.get('remote_print_enabled', True):
+            return
+        if not self.current_est:
+            return
+
+        # Уже идёт опрос — не запускаем второй
+        if self._poll_in_progress:
+            return
+
+        # Пытаемся тихо поднять API-клиент (тоже быстрое)
+        if not self._ensure_api_silent():
+            return
+
+        self._poll_in_progress = True
+
+        from ui.print_poller import PollRunnable
+        task = PollRunnable(self.api, self.current_est['id'])
+        task.signals.finished.connect(self._on_poll_finished)
+        task.signals.error.connect(self._on_poll_error)
+        self._thread_pool.start(task)
+
+
+    def _execute_remote_print(self, job):
+        """Печатает одну этикетку из задания."""
+        printer = self.config.get('printer_name') or get_default_printer()
+        if not printer:
+            self._report_print_job(job['id'], 'error', 'Принтер не выбран')
+            return
+
+        try:
+            payload = job['payload']
+            data = {
+                'name': payload.get('name', ''),
+                'print_time_str': payload.get('print_time_str', ''),
+                'expiration_time_str': payload.get('expiration_time_str', ''),
+                'storage_temperature': payload.get('storage_temperature', ''),
+                'storage_period_text': payload.get('storage_period_text', ''),
+                'marked_by': payload.get('marked_by', ''),
+            }
+
+            pm = render_label_pixmap(data)
+            tmp = os.path.join(tempfile.gettempdir(), f"remote_{job['id']}.png")
+            pm.save(tmp, 'PNG')
+
+            print_image_tspl(printer, tmp)
+            os.remove(tmp)
+
+            self._report_print_job(job['id'], 'done')
+            self.status_label.setText(f"✅ Удалённая печать: {payload.get('name', '')}")
+
+        except Exception as e:
+            self._report_print_job(job['id'], 'error', str(e))
+            self.status_label.setText(f"❌ Ошибка удалённой печати: {e}")
+
+
+    def _report_print_job(self, job_id, status, error=''):
+        try:
+            self.api.print_complete(job_id, status, error)
+        except ApiError:
+            pass
+        
+        
+    def _ensure_api_silent(self):
+        if self.api and not self.offline:
+            return True
+
+        url = self.config.get('api_url')
+        key = self.config.get('api_key')
+        if not url or not key:
+            return False
+
+        try:
+            client = ApiClient(url, key)
+            client.me_fast()   # ← быстрый
+        except ApiError:
+            return False
+
+        self.api = client
+        self.offline = False
+        return True
+    
+
+    def eventFilter(self, obj, event):
+        """
+        Ловим любые действия пользователя и сбрасываем таймер тишины.
+        Пока таймер не сработал — не опрашиваем сервер.
+        """
+        # Нас интересуют только действия: клики, клавиши, колесо, движение мыши
+        if event.type() in (
+            QEvent.MouseButtonPress,
+            QEvent.MouseButtonRelease,
+            QEvent.KeyPress,
+            QEvent.Wheel,
+            QEvent.TouchBegin,
+            QEvent.TouchUpdate,
+        ):
+            # Сбрасываем таймер — пользователь активен
+            if hasattr(self, '_idle_timer'):
+                self._idle_timer.start()  # перезапускает с нуля
+        return super().eventFilter(obj, event)
+    
+    def _on_idle(self):
+        """
+        Вызывается, когда пользователь 2 секунды ничего не делал.
+        Здесь и запускаем опрос сервера.
+        """
+        self._poll_print_jobs()
+        
+    def _on_poll_finished(self, jobs):
+        """Вызывается в GUI-потоке, когда фоновый запрос завершился."""
+        self._poll_in_progress = False
+
+        if not jobs:
+            return
+
+        for job in jobs:
+            self._execute_remote_print(job)
+
+
+    def _on_poll_error(self, error_message):
+        """Ошибка сети — переключаемся в оффлайн."""
+        self._poll_in_progress = False
+        self.offline = True
+        self._update_remote_label()
+        # Не показываем QMessageBox — это фоновая ошибка

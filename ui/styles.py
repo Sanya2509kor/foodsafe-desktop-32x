@@ -380,3 +380,158 @@ QToolTip {
     padding: 4px;
 }
 """
+
+
+# ui/styles.py
+
+def _scale_px(value, scale):
+    """Умножает пиксели на коэффициент, округляет."""
+    return int(round(value * scale))
+
+
+def build_qss(theme: str, scale: float = 1.0) -> str:
+    """
+    Собирает QSS под тему и масштаб.
+    theme: 'light' | 'dark'
+    scale: 1.0 — обычный, 1.3 — крупный, 1.6 — очень крупный
+    """
+    if theme == 'dark':
+        bg        = '#1a1d21'
+        bg_top    = '#24282e'
+        bg_field  = '#2f343b'
+        border    = '#343a40'
+        border2   = '#454c55'
+        text      = '#e6e8eb'
+        text_dim  = '#9aa4af'
+        accent    = '#4dabf7'
+        sidebar   = '#24282e'
+    else:
+        bg        = '#f5f7fa'
+        bg_top    = '#ffffff'
+        bg_field  = '#ffffff'
+        border    = '#e9ecef'
+        border2   = '#ced4da'
+        text      = '#212529'
+        text_dim  = '#6c757d'
+        accent    = '#0d6efd'
+        sidebar   = '#ffffff'
+
+    base_font   = _scale_px(14, scale)
+    small_font  = _scale_px(12, scale)
+    tiny_font   = _scale_px(11, scale)
+    title_font  = _scale_px(22, scale)
+    subtitle_font = _scale_px(16, scale)
+    brand_font  = _scale_px(20, scale)
+
+    btn_pad_v   = _scale_px(8, scale)
+    btn_pad_h   = _scale_px(14, scale)
+    btn_radius  = _scale_px(8, scale)
+
+    icon_min    = _scale_px(36, scale)
+    icon_max    = _scale_px(36, scale)
+    icon_h      = _scale_px(34, scale)
+
+    field_pad_v = _scale_px(6, scale)
+    field_pad_h = _scale_px(10, scale)
+
+    return f"""
+* {{ font-family: 'Segoe UI', Arial; font-size: {base_font}px; }}
+
+QMainWindow, QWidget#centralWidget {{
+    background-color: {bg};
+    color: {text};
+}}
+
+QFrame#topbar {{ background-color: {bg_top}; border-bottom: 1px solid {border}; }}
+QFrame#topbar2 {{ background-color: {bg_top}; border-bottom: 1px solid {border}; }}
+QFrame#sidebar {{ background-color: {sidebar}; border: 1px solid {border}; border-radius: 10px; }}
+
+QLabel#brand {{
+    color: {accent};
+    font-size: {brand_font}px;
+    font-weight: 800;
+    padding-right: 6px;
+}}
+
+QLabel {{ color: {text}; background: transparent; }}
+QLabel.field-label {{ color: {text_dim}; font-size: {small_font}px; font-weight: 600; }}
+QLabel.hint {{ color: {text_dim}; font-size: {tiny_font}px; }}
+QLabel.empty {{ color: {text_dim}; font-size: {subtitle_font}px; padding: 40px; }}
+
+QPushButton {{
+    background-color: #0d6efd;
+    color: white;
+    border: none;
+    padding: {btn_pad_v}px {btn_pad_h}px;
+    border-radius: {btn_radius}px;
+    font-weight: 600;
+    min-height: {_scale_px(30, scale)}px;
+}}
+QPushButton:hover {{ background-color: #0b5ed7; }}
+QPushButton:pressed {{ background-color: #0a58ca; }}
+QPushButton:disabled {{ background-color: #b6c2cf; color: #f2f4f7; }}
+
+QPushButton.secondary {{ background-color: {'#343a40' if theme=='dark' else '#eef1f5'};
+                         color: {text}; }}
+QPushButton.secondary:hover {{ background-color: {'#3d444d' if theme=='dark' else '#e2e6ea'}; }}
+QPushButton.secondary:checked {{ background-color: #1c4b8e; color: #d0e2ff; }}
+
+QPushButton.success {{ background-color: #198754; }}
+QPushButton.success:hover {{ background-color: #157347; }}
+QPushButton.danger {{ background-color: #dc3545; }}
+QPushButton.danger:hover {{ background-color: #bb2d3b; }}
+
+QPushButton.icon-btn {{
+    min-width: {icon_min}px;
+    max-width: {icon_max}px;
+    min-height: {icon_h}px;
+    padding: 0;
+    font-size: {_scale_px(18, scale)}px;
+}}
+
+QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QDateEdit, QDateTimeEdit {{
+    background-color: {bg_field};
+    border: 1px solid {border2};
+    border-radius: {btn_radius}px;
+    padding: {field_pad_v}px {field_pad_h}px;
+    color: {text};
+    selection-background-color: #0d6efd;
+    selection-color: white;
+    min-height: {_scale_px(22, scale)}px;
+}}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {accent}; }}
+
+QListWidget {{
+    background: {sidebar};
+    border: 1px solid {border};
+    border-radius: 8px;
+    padding: 4px;
+    color: {text};
+    font-size: {base_font}px;
+}}
+QListWidget::item {{ padding: {_scale_px(8, scale)}px {_scale_px(12, scale)}px;
+                     border-radius: 4px; }}
+QListWidget::item:hover {{ background: {'#2f343b' if theme=='dark' else '#f1f5fb'}; }}
+QListWidget::item:selected {{ background: {'#1c4b8e' if theme=='dark' else '#e7f1ff'};
+                              color: {'#d0e2ff' if theme=='dark' else '#0d6efd'};
+                              font-weight: 600; }}
+
+QScrollArea {{ border: none; background: transparent; }}
+
+QStatusBar {{ background: {bg_top}; border-top: 1px solid {border}; color: {text_dim};
+              font-size: {small_font}px; }}
+
+QDialog {{ background-color: {bg}; color: {text}; }}
+
+QFrame.card {{ background: {sidebar}; border: 1px solid {border}; border-radius: 10px; }}
+QFrame.card:hover {{ border-color: {accent}; }}
+QLabel.card-title {{ font-size: {_scale_px(15, scale)}px; font-weight: 700; color: {text}; }}
+QLabel.card-meta  {{ font-size: {small_font}px; color: {text_dim}; }}
+
+QFrame.cart-item {{ background: {sidebar}; border: 1px solid {border}; border-radius: 8px; }}
+"""
+
+
+# Удобные алиасы (чтобы не переделывать весь код)
+MAIN_QSS = build_qss('light', 1.0)
+DARK_QSS = build_qss('dark', 1.0)

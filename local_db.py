@@ -27,7 +27,10 @@ def init_db():
             name TEXT NOT NULL,
             role TEXT,
             timezone TEXT,
-            invite_code TEXT
+            invite_code TEXT,
+            paid_until TEXT,
+            is_paid INTEGER,
+            days_left INTEGER
         );
         CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY,
@@ -89,6 +92,17 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_emp_est ON employees(establishment_id);
         CREATE INDEX IF NOT EXISTS idx_cart_est ON cart_items(establishment_id);
         """)
+        
+        # Миграции для старых баз
+        for table, col, coltype in [
+            ('establishments', 'paid_until', 'TEXT'),
+            ('establishments', 'is_paid', 'INTEGER'),
+            ('establishments', 'days_left', 'INTEGER'),
+        ]:
+            try:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+            except sqlite3.OperationalError:
+                pass  # столбец уже есть
 
 
 # ---------- meta ----------
@@ -118,10 +132,20 @@ def save_establishments(items):
     with conn() as c:
         c.execute("DELETE FROM establishments")
         c.executemany(
-            "INSERT INTO establishments(id, name, role, timezone, invite_code) "
-            "VALUES(?, ?, ?, ?, ?)",
-            [(e['id'], e['name'], e.get('role'), e.get('timezone'),
-              e.get('invite_code')) for e in items]
+            "INSERT INTO establishments("
+            "id, name, role, timezone, invite_code, "
+            "paid_until, is_paid, days_left"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            [(
+                e['id'],
+                e['name'],
+                e.get('role'),
+                e.get('timezone'),
+                e.get('invite_code'),
+                e.get('paid_until'),
+                1 if e.get('is_paid', True) else 0,
+                e.get('days_left'),
+            ) for e in items]
         )
 
 

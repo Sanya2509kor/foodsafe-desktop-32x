@@ -174,3 +174,53 @@ class ApiClient:
         if not result.get('success'):
             raise ApiError(result.get('error', 'Неизвестная ошибка'))
         return result
+    
+    
+    def print_pending(self, establishment_id):
+        return self._get(f'/api/establishments/{establishment_id}/print/pending/')
+
+    def print_complete(self, job_id, status, error=''):
+        url = f'{self.base_url}/api/print/{job_id}/complete/'
+        data = {'key': self.api_key, 'status': status}
+        if error:
+            data['error'] = error
+        return self._post(url, data)
+    
+    
+    # api_client.py
+    def print_pending_fast(self, establishment_id):
+        """Быстрый опрос pending-заданий без retry и с коротким таймаутом."""
+        params = {'key': self.api_key}
+        url = f'{self.base_url}/api/establishments/{establishment_id}/print/pending/'
+        try:
+            r = self.session.get(url, params=params, timeout=3)
+        except requests.RequestException as e:
+            raise ApiError(f'Нет связи: {e}')
+
+        if r.status_code == 401:
+            raise ApiError('Неверный ключ')
+        if not r.ok:
+            raise ApiError(f'HTTP {r.status_code}')
+
+        data = r.json()
+        if not data.get('success'):
+            raise ApiError(data.get('error', 'Ошибка'))
+        return data
+    
+    # api_client.py
+    def me_fast(self):
+        """Проверка ключа без retry и с коротким таймаутом."""
+        params = {'key': self.api_key}
+        url = f'{self.base_url}/api/me/'
+        try:
+            r = self.session.get(url, params=params, timeout=3)
+        except requests.RequestException as e:
+            raise ApiError(f'Нет связи: {e}')
+        if r.status_code == 401:
+            raise ApiError('Неверный ключ')
+        if not r.ok:
+            raise ApiError(f'HTTP {r.status_code}')
+        data = r.json()
+        if not data.get('success'):
+            raise ApiError(data.get('error', 'Ошибка'))
+        return data

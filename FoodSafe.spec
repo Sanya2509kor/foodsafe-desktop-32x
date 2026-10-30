@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('assets', 'assets')]
 binaries = []
-hiddenimports = ['PyQt5.QtPrintSupport', 'win32print', 'win32ui', 'PIL', 'PIL.Image']
+hiddenimports = ['PyQt5.QtPrintSupport', 'PyQt5.QtSvg', 'win32print', 'win32ui', 'PIL', 'PIL.Image']
 tmp_ret = collect_all('PyQt5')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 

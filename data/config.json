@@ -1,17 +1,19 @@
 {
-  "api_url": "https://checkin-site.tw1.ru",
-  "api_key": "S2-RAaBCXcNME6LVjDOGdr9UmxlV4sP3eBwaqguArwc",
+  "api_url": "https://markirovki24.ru",
+  "api_key": "AWGDEVw-Y9XdWPVZ9y1xB2Sk8LVFC103YjmG7DvWzd4",
   "printer_name": "IP-802",
   "label_width_mm": 58,
   "label_height_mm": 60,
   "auto_sync_on_start": false,
   "auto_sync_minutes": 0,
   "selected_employee": {
-    "1": 6,
     "18": 30,
-    "5": 18
+    "5": 18,
+    "1": 1
   },
   "categories_visible": true,
   "theme": "dark",
-  "print_delay_ms": 300
+  "print_delay_ms": 300,
+  "ui_scale": "normal",
+  "remote_print_enabled": true
 }

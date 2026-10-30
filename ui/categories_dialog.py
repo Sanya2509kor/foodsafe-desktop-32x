@@ -22,7 +22,7 @@ class CategoriesDialog(QDialog):
         self.setWindowTitle(f'Категории — {establishment["name"]}')
         theme = settings.load_config().get('theme', 'light')
         self.setStyleSheet(DARK_QSS if theme == 'dark' else MAIN_QSS)
-        self.resize(560, 640)
+        self.resize(660, 640)
 
         self._build_ui()
         self._reload()
